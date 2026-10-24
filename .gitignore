@@ -39,13 +39,22 @@ env/
 *.sublime-workspace
 
 # Large datasets & data files
-data/*.csv
-data/*.zip
-data/*.tar.gz
+data/
+*.csv
+*.zip
+*.tar.gz
 
 # Logs & outputs
 *.log
 output.log
+
+# Generated experiment artifacts & comparison plots
+*.png
+results.json
+experiment_metadata.json
+
+# Package manager locks (if preferring clean git diffs)
+uv.lock
 
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
@@ -58,6 +67,3 @@ output.log
 # OS generated files
 .DS_Store
 Thumbs.db
-
-*.png
-results.json

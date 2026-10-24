@@ -102,7 +102,7 @@ def solve_exact(qubo):
     
     start_time = time.time()
     best_cost = float('inf')
-    best_mask = None
+    best_mask: tuple[int, ...] = ()
     
     # Enumerate all C(m, k) combinations
     for combo in combinations(range(m), k):
@@ -155,7 +155,7 @@ def solve_qaoa(qubo, p=1, shots=1024, maxiter=50):
         for bitstring, count in counts.items():
             # Qiskit bitstring order is little-endian: bitstring[::-1] gives [q0, q1, ..., q_{m-1}]
             clean_bits = bitstring.replace(' ', '')
-            x = np.array([int(b) for b in clean_bits[::-1]])
+            x = [int(b) for b in clean_bits[::-1]]
             cost = sum(Q[i, i] * x[i] for i in range(m)) + sum(Q[i, j] * x[i] * x[j] for i in range(m) for j in range(i + 1, m))
             expected_energy += (count / total_shots) * cost
             
@@ -166,7 +166,7 @@ def solve_qaoa(qubo, p=1, shots=1024, maxiter=50):
     opt_result = minimize(objective_fn, init_params, method='COBYLA', options={'maxiter': maxiter})
     
     # 6. Final measurement sampling with optimal parameters
-    optimal_circ = transpiled_circuit.assign_parameters(opt_result.x)
+    optimal_circ = transpiled_circuit.assign_parameters(list(opt_result.x))
     final_job = backend.run(optimal_circ, shots=max(shots, 2048))
     counts = final_job.result().get_counts()
     
@@ -174,11 +174,11 @@ def solve_qaoa(qubo, p=1, shots=1024, maxiter=50):
     valid_candidates = []
     for bitstring, count in counts.items():
         clean_bits = bitstring.replace(' ', '')
-        x = np.array([int(b) for b in clean_bits[::-1]], dtype=float)
-        if int(np.sum(x)) == k:
-            indices = [i for i, val in enumerate(x) if val == 1.0]
+        x_list = [int(b) for b in clean_bits[::-1]]
+        if sum(x_list) == k:
+            indices = [i for i, val in enumerate(x_list) if val == 1]
             cost = cost_function(indices, qubo)
-            valid_candidates.append((x, cost, count))
+            valid_candidates.append((np.array(x_list, dtype=float), cost, count))
             
     if valid_candidates:
         # Sort by minimum cost, breaking ties by frequency/count
@@ -202,9 +202,12 @@ if __name__ == "__main__":
     k = 6   # Target subset size to select
     
     r = np.random.uniform(0.3, 1.0, size=m)  # Relevance scores
-    d = np.random.uniform(0.1, 0.8, size=(m, m))  # Redundancy matrix
-    d = (d + d.T) / 2.0
-    np.fill_diagonal(d, 0.0)
+    d = np.zeros((m, m), dtype=float)
+    for i in range(m):
+        for j in range(i + 1, m):
+            val = float(np.random.uniform(0.1, 0.8))
+            d[i, j] = val
+            d[j, i] = val
     u = np.random.uniform(0.05, 0.3, size=m)  # Instability scores
     
     qubo = formulate_qubo(r, d, u, k=k, alpha=1.0, beta=1.0, eta=1.0, A=10.0)
@@ -222,7 +225,8 @@ if __name__ == "__main__":
     print(f"      QAOA Cost              : {qaoa_cost:.4f} (Runtime: {qaoa_time:.3f}s)")
     
     if opt_res is not None and hasattr(opt_res, 'x'):
-        print(f"      Optimal Angles (gamma, beta): {np.round(opt_res.x, 4)}")
+        rounded_angles = [round(float(val), 4) for val in opt_res.x]
+        print(f"      Optimal Angles (gamma, beta): {rounded_angles}")
         print(f"      COBYLA Iterations      : {opt_res.nfev} (Success: {opt_res.success})")
         
     print(f"\n[3/3] Solution Comparison:")

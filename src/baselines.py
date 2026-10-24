@@ -51,10 +51,9 @@ def evaluate_robustness(rf, X_test, y_test, features, R=5, sigma=1.0):
 def get_xgboost_importance(X_train, y_train, k=10):
     xgb = XGBClassifier(n_estimators=50, random_state=42, n_jobs=-1, eval_metric='logloss')
     xgb.fit(X_train, y_train)
-    importances = xgb.feature_importances_
-    
-    top_indices = np.argsort(importances)[::-1][:k]
-    top_features = X_train.columns[top_indices].tolist()
+    importances = list(xgb.feature_importances_)
+    top_indices = sorted(range(len(importances)), key=lambda i: float(importances[i]), reverse=True)[:k]
+    top_features = [X_train.columns[i] for i in top_indices]
     return top_features
 
 def get_rfe_svm_features(X_train, y_train, k=8):

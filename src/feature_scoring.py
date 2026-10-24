@@ -15,8 +15,9 @@ def calculate_relevance(X, y, m=12):
     # Extract relevance for top m
     r_raw = mi_series[top_m_features].values
     # Normalize relevance [0, 1]
-    if r_raw.max() > 0:
-        r_normalized = r_raw / r_raw.max()
+    r_max = float(max(r_raw))
+    if r_max > 0:
+        r_normalized = np.array([float(val) / r_max for val in r_raw], dtype=float)
     else:
         r_normalized = r_raw
         
@@ -65,8 +66,9 @@ def calculate_instability(X_fit, y_fit, X_val, y_val, features, R=5, sigma=1.0):
         u_raw[idx] = max(0, f1_clean - f1_avg_pert)
         
     # Normalize instability
-    if u_raw.max() > 0:
-        u_normalized = u_raw / u_raw.max()
+    u_max = float(max(u_raw))
+    if u_max > 0:
+        u_normalized = np.array([float(val) / u_max for val in u_raw], dtype=float)
     else:
         u_normalized = u_raw
         
