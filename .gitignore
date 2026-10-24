@@ -61,3 +61,7 @@ Thumbs.db
 
 *.png
 results.json
+experiment_metadata.json
+
+data/
+*.csv

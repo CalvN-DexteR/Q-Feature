@@ -14,7 +14,7 @@ def plot_results(json_path='results.json'):
     plt.style.use('ggplot')
     
     # 1. Plot Performance Metrics (F1, Accuracy, Precision, Recall)
-    metrics_to_plot = ['Accuracy', 'Precision', 'Recall', 'F1']
+    metrics_to_plot = [m for m in ['Accuracy', 'Precision', 'Recall', 'F1'] if m in df.columns]
     ax = df.plot(x='Method', y=metrics_to_plot, kind='bar', figsize=(12, 6), width=0.8)
     plt.title('Classification Performance Comparison by Method')
     plt.ylabel('Score')
@@ -27,7 +27,7 @@ def plot_results(json_path='results.json'):
     print("Saved performance_comparison.png")
     
     # 2. Plot Robustness (Clean vs Perturbed F1)
-    robustness_metrics = ['Clean F1', 'Perturbed F1']
+    robustness_metrics = [m for m in ['Clean F1', 'Perturbed F1'] if m in df.columns]
     ax2 = df.plot(x='Method', y=robustness_metrics, kind='bar', figsize=(10, 6), color=['#1f77b4', '#d62728'])
     plt.title('Robustness Comparison: Clean vs Perturbed F1-Score')
     plt.ylabel('F1-Score')
@@ -39,25 +39,37 @@ def plot_results(json_path='results.json'):
     print("Saved robustness_comparison.png")
     
     # 3. Print Tabular Results nicely to console
-    print("\n" + "="*80)
-    print("FINAL RESULTS TABLE")
-    print("="*80)
+    print("\n" + "="*95)
+    print("FINAL BENCHMARK RESULTS")
+    print("="*95)
     
     # Formatting for terminal output
     pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 200)
+    pd.set_option('display.width', 220)
     
-    # Select columns to display
-    display_cols = ['Method', 'Features', 'Accuracy', 'Precision', 'Recall', 'F1', 'Clean F1', 'Perturbed F1', 'RD (pp)', 'Feature Reduction (%)']
+    # Candidate columns to display
+    desired_cols = ['Method', 'Features', 'Accuracy', 'Precision', 'Recall', 'F1', 'Clean F1', 'Perturbed F1', 'RD (pp)', 'Feature Reduction (%)']
+    display_cols = [c for c in desired_cols if c in df.columns]
     df_display = df[display_cols].copy()
     
     # Format numbers for better readability
     for col in ['Accuracy', 'Precision', 'Recall', 'F1', 'Clean F1', 'Perturbed F1', 'RD (pp)']:
-        df_display[col] = df_display[col].apply(lambda x: f"{x:.4f}")
-    df_display['Feature Reduction (%)'] = df_display['Feature Reduction (%)'].apply(lambda x: f"{x:.1f}%")
+        if col in df_display.columns:
+            df_display[col] = df_display[col].apply(lambda x: f"{x:.4f}" if isinstance(x, (int, float)) else str(x))
+    if 'Feature Reduction (%)' in df_display.columns:
+        df_display['Feature Reduction (%)'] = df_display['Feature Reduction (%)'].apply(lambda x: f"{x:.1f}%" if isinstance(x, (int, float)) else str(x))
     
     print(df_display.to_string(index=False))
-    print("="*80 + "\n")
+    print("="*95)
+    
+    # If selected features are recorded, print summary breakdown
+    if 'Selected_Features' in df.columns:
+        print("\nSELECTED FEATURE SUBSETS:")
+        for idx, row in df.iterrows():
+            feat_list = row.get('Selected_Features', [])
+            feat_str = ", ".join(feat_list) if isinstance(feat_list, list) else str(feat_list)
+            print(f"  • {row['Method']:<22} ({len(feat_list)} feats): {feat_str}")
+        print("="*95 + "\n")
 
 if __name__ == "__main__":
     plot_results()

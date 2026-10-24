@@ -3,11 +3,15 @@ import time
 from itertools import combinations
 from scipy.optimize import minimize
 
+import warnings
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
 # Qiskit 1.0+ / 2.0+ and Qiskit-Aer imports
 from qiskit import transpile
 from qiskit.circuit.library import QAOAAnsatz
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
+from qiskit_aer.primitives import Estimator
 
 def formulate_qubo(r, d, u, k=6, alpha=1.0, beta=1.0, eta=1.0, A=10.0):
     m = len(r)
@@ -115,14 +119,15 @@ def solve_exact(qubo):
         
     return mask, best_cost, runtime
 
-def solve_qaoa(qubo, p=1, shots=1024, maxiter=50):
+def solve_qaoa(qubo, p=1, shots=2048, maxiter=50, random_state=42):
     """
     Executes real QAOA simulation using Qiskit Aer:
       1. Converts QUBO to an Ising Cost Hamiltonian.
       2. Constructs parameterized QAOA circuit (QAOAAnsatz) with p layers.
-      3. Transpiles and executes on AerSimulator (statevector method).
-      4. Optimizes gamma and beta parameters using classical COBYLA.
-      5. Samples the final quantum state and extracts the optimal bitstring.
+      3. Uses Qiskit Aer Estimator (approximation=True) for exact, shot-noise-free
+         expectation value evaluation during classical COBYLA optimization.
+      4. Samples the final quantum state using AerSimulator with shots.
+      5. Extracts valid bitstrings satisfying sum(x) == k and computes feasibility telemetry.
     """
     start_time = time.time()
     m = qubo['m']
@@ -134,53 +139,67 @@ def solve_qaoa(qubo, p=1, shots=1024, maxiter=50):
     
     # 2. Build QAOA Ansatz circuit
     ansatz = QAOAAnsatz(cost_operator=cost_op, reps=p)
-    ansatz.measure_all()
     
-    # 3. Transpile circuit for Qiskit Aer
-    backend = AerSimulator(method='statevector')
-    transpiled_circuit = transpile(ansatz, backend)
+    # 3. Exact expectation evaluation for smooth, deterministic COBYLA optimization
+    estimator = Estimator(approximation=True)
     
-    # 4. Objective function for classical optimizer (evaluating expectation value of QUBO cost)
     def objective_fn(params):
-        bound_circ = transpiled_circuit.assign_parameters(params)
-        job = backend.run(bound_circ, shots=shots)
-        counts = job.result().get_counts()
-        
-        expected_energy = 0.0
-        total_shots = sum(counts.values())
-        for bitstring, count in counts.items():
-            # Qiskit bitstring order is little-endian: bitstring[::-1] gives [q0, q1, ..., q_{m-1}]
-            x = np.array([int(b) for b in bitstring[::-1]])
-            cost = sum(Q[i, i] * x[i] for i in range(m)) + sum(Q[i, j] * x[i] * x[j] for i in range(m) for j in range(i + 1, m))
-            expected_energy += (count / total_shots) * cost
-            
-        return expected_energy
+        res = estimator.run([ansatz], [cost_op], [params]).result()
+        return res.values[0]
 
-    # 5. Variational optimization of gamma and beta angles using COBYLA
-    init_params = np.full(2 * p, 0.5)
+    # 4. Variational parameter initialization (Trotterized Quantum Annealing schedule)
+    gamma_init = np.linspace(0.1, 0.5, p)
+    beta_init = np.linspace(0.5, 0.1, p)
+    init_params = np.concatenate([gamma_init, beta_init])
+    
     opt_result = minimize(objective_fn, init_params, method='COBYLA', options={'maxiter': maxiter})
     
-    # 6. Final measurement sampling with optimal parameters
+    # 5. Final measurement sampling on AerSimulator with optimal variational angles
+    circuit_for_sampling = ansatz.copy()
+    circuit_for_sampling.measure_all()
+    backend = AerSimulator(method='statevector', seed_simulator=random_state)
+    transpiled_circuit = transpile(circuit_for_sampling, backend)
     optimal_circ = transpiled_circuit.assign_parameters(opt_result.x)
+    
     final_job = backend.run(optimal_circ, shots=max(shots, 2048))
     counts = final_job.result().get_counts()
     
-    # 7. Extract bitstrings that satisfy the constraint sum(x) == k
+    # 6. Extract and filter bitstrings that satisfy cardinality constraint sum(x) == k
     valid_candidates = []
+    total_valid_shots = 0
+    total_shots = sum(counts.values())
+    
     for bitstring, count in counts.items():
+        # Little-endian bitstring mapping
         x = np.array([int(b) for b in bitstring[::-1]])
         if np.sum(x) == k:
+            total_valid_shots += count
             indices = [i for i, val in enumerate(x) if val == 1]
             cost = cost_function(indices, qubo)
             valid_candidates.append((x, cost, count))
             
+    feasibility_ratio = total_valid_shots / total_shots if total_shots > 0 else 0.0
+    fallback_used = False
+    
     if valid_candidates:
         # Sort by minimum cost, breaking ties by frequency/count
         valid_candidates.sort(key=lambda item: (item[1], -item[2]))
-        best_mask, best_cost, _ = valid_candidates[0]
+        best_mask, best_cost, best_count = valid_candidates[0]
+        print(f"  [QAOA] Feasibility Ratio: {feasibility_ratio * 100:.2f}% ({total_valid_shots}/{total_shots} shots). "
+              f"Best cost: {best_cost:.4f} (sampled {best_count} times).")
     else:
-        # Fallback to classical ground state if no exact k-weight bitstring was sampled
+        print(f"  [WARNING] QAOA failed to sample any valid bitstrings satisfying sum(x) == {k} "
+              f"(feasibility: 0.00%). Falling back to classical exact ground state.")
+        fallback_used = True
         best_mask, best_cost, _ = solve_exact(qubo)
         
     runtime = time.time() - start_time
-    return best_mask, best_cost, runtime, opt_result
+    diagnostics = {
+        'feasibility_ratio': feasibility_ratio,
+        'fallback_used': fallback_used,
+        'valid_candidates_count': len(valid_candidates),
+        'optimal_params': opt_result.x.tolist(),
+        'optimization_energy': float(opt_result.fun)
+    }
+    
+    return best_mask, best_cost, runtime, opt_result, diagnostics
